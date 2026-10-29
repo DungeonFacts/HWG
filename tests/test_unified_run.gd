@@ -4,7 +4,7 @@ func _init():
 	call_deferred("_run_test")
 
 func _run_test():
-	print("=== Running Unified Game Run Test ===")
+	print("=== Running Refined Unified Game Run Test ===")
 	var main_scene = load("res://scenes/main.tscn")
 	var main = main_scene.instantiate()
 	root.add_child(main)
@@ -16,93 +16,98 @@ func _run_test():
 	assert(main.active_experiment == 10, "Expected Unified Game Run active")
 	assert(main.inventory_cards.size() == 4, "Expected 4 initial cards in Unified Run")
 
-	# Test 1: Forage Woods by slotting Wizard into Forage Activity
-	print("Test 1: Foraging woods...")
+	# Test 1: Slotted Card Inventory Filtering
+	print("Test 1: Slotted card inventory filtering...")
 	var forage_event = main.events_container.get_child(0) # uni_act_forage
 	var wizard_card = {}
 	for card in main.inventory_cards:
 		if card.id == "wizard": wizard_card = card
 
+	# Before slotting, inventory UI container has 4 children
+	assert(main.inventory_container.get_child_count() == 4, "Inventory container has 4 cards initially")
+
+	# Slot wizard card into forage
 	assert(forage_event.slot_instances[0].slot_card(wizard_card), "Slot wizard into forage event")
-	assert(forage_event.get_staged_action_id() == "uni_forage", "Action staged for End Turn")
-
-	# Click End Turn -> Should resolve forage action and grant wood or herb
-	main._on_end_turn_pressed()
 	await process_frame
 
-	assert(main.inventory_cards.size() == 5, "Cards in tableau increased to 5 after forage")
+	# Slotted card must be hidden from inventory container!
+	assert(main.inventory_container.get_child_count() == 3, "Inventory container hides slotted card (3 visible)")
 
-	# Test 2: Multi-turn Carve Totem Ambition
-	print("Test 2: Working on Spirit Totem ambition...")
-	var yew_card = {}
-	for card in main.inventory_cards:
-		if card.id == "yew_heartwood": yew_card = card
+	# Unslot wizard card
+	forage_event.clear_all_slots()
+	await process_frame
+	assert(main.inventory_container.get_child_count() == 4, "Inventory container restores unslotted card (4 visible)")
 
-	# If forage yielded herb instead of yew wood, add yew wood for test determinism
-	if yew_card.is_empty():
-		main.add_card_to_inventory({"id": "yew_heartwood", "title": "Yew Heartwood", "tag": "yew_heartwood", "description": "Test Yew Wood"})
-		for card in main.inventory_cards:
-			if card.id == "yew_heartwood": yew_card = card
-
-	# Find totem event
-	var totem_event = null
+	# Test 2: Animate Homunculus
+	print("Test 2: Animate Homunculus activity...")
+	var homunculus_event = null
 	for child in main.events_container.get_children():
-		if child.event_data.id == "uni_amb_totem":
-			totem_event = child
+		if child.event_data.id == "uni_act_homunculus":
+			homunculus_event = child
 			break
 
-	assert(totem_event != null, "Totem event present")
-	assert(totem_event.slot_instances[0].slot_card(wizard_card), "Slot wizard into totem event")
-	assert(totem_event.slot_instances[1].slot_card(yew_card), "Slot yew into totem event")
+	assert(homunculus_event != null, "Homunculus activity event present")
 
-	main._on_end_turn_pressed()
-	await process_frame
-
-	assert(main.totem_progress == 1, "Totem progress advanced to 1/2")
-
-	# Test 3: Card Expiry / Decay Test
-	print("Test 3: Testing expiring cards...")
-	main.add_card_to_inventory({
-		"id": "fleeting_essence",
-		"title": "Fleeting Essence",
-		"tag": "reagent",
-		"description": "Fades away.",
-		"expires_in_turns": 1
-	})
-	assert(main.inventory_cards.size() >= 5, "Expiring card added")
-
-	main._on_end_turn_pressed()
-	await process_frame
-
-	# Check that fleeting essence expired
-	var found_fleeting = false
+	var herb_card = {}
 	for card in main.inventory_cards:
-		if card.id == "fleeting_essence":
-			found_fleeting = true
-	assert(not found_fleeting, "Fleeting essence expired and was removed")
+		if card.id == "medicinal_herb": herb_card = card
 
-	# Test 4: Complete Victory condition (Great Work of Magick)
-	print("Test 4: Achieving Victory via Great Work of Magick...")
-	main.great_work_progress = 2 # Set to 2/3 so 1 more work triggers win
-	var great_work_event = null
+	assert(homunculus_event.slot_instances[0].slot_card(wizard_card), "Slot wizard into homunculus activity")
+	assert(homunculus_event.slot_instances[1].slot_card(herb_card), "Slot herb into homunculus activity")
+
+	main._on_end_turn_pressed()
+	await process_frame
+
+	var found_homunculus = false
+	var homunculus_card = {}
+	for card in main.inventory_cards:
+		if card.id == "homunculus":
+			found_homunculus = true
+			homunculus_card = card
+	assert(found_homunculus, "Homunculus card created successfully")
+	assert(homunculus_card.tag == "wizard", "Homunculus has tag 'wizard'")
+	assert(homunculus_card.expires_in_turns == 3, "Homunculus expires in 3 turns")
+
+	# Test 3: Homunculus acting as Wizard in event slot
+	print("Test 3: Using Homunculus as Wizard in event...")
+	var brew_event = null
 	for child in main.events_container.get_children():
-		if child.event_data.id == "uni_amb_great_work":
-			great_work_event = child
+		if child.event_data.id == "uni_act_brew":
+			brew_event = child
 			break
 
-	assert(great_work_event != null, "Great work event present")
-	assert(great_work_event.slot_instances[0].slot_card(wizard_card), "Slot wizard into great work")
-	var grimoire_card = {}
-	for card in main.inventory_cards:
-		if card.id == "forbidden_grimoire": grimoire_card = card
-	assert(great_work_event.slot_instances[1].slot_card(grimoire_card), "Slot grimoire into great work")
+	# Add an herb for brewing
+	main.add_card_to_inventory({"id": "medicinal_herb", "title": "Medicinal Herb", "tag": "herb", "description": "Healing plant."})
+	var new_herb = main.inventory_cards[main.inventory_cards.size() - 1]
+
+	# Slot Homunculus into Wizard slot of brew_event!
+	assert(brew_event.slot_instances[0].slot_card(homunculus_card), "Homunculus accepted in Wizard slot")
+	assert(brew_event.slot_instances[1].slot_card(new_herb), "Herb accepted in Herb slot")
 
 	main._on_end_turn_pressed()
 	await process_frame
 
-	assert(main.great_work_progress == 3, "Great work progress reached 3/3")
-	assert(main.game_over == true, "Game Over triggered on victory")
-	assert(main.current_stage == "VICTORY", "Victory achieved")
+	var found_remedy = false
+	for card in main.inventory_cards:
+		if card.id == "potent_remedy": found_remedy = true
+	assert(found_remedy, "Brewing with Homunculus produced Potent Remedy!")
 
-	print("=== UNIFIED GAME RUN TEST PASSED SUCCESSFULLY! ===")
+	# Test 4: Mass Mitigation Threshold (3 Negative Cards)
+	print("Test 4: Mass Mitigation event spawning on 3+ negative cards...")
+	main.add_card_to_inventory({"id": "villager_grievance", "title": "Villager Grievance", "tag": "grievance", "description": "Negative 1"})
+	main.add_card_to_inventory({"id": "blighted_soil", "title": "Blighted Soil", "tag": "path_constraint", "description": "Negative 2"})
+	main.add_card_to_inventory({"id": "forest_curse", "title": "Forest Lord Curse", "tag": "curse", "description": "Negative 3"})
+
+	main._refresh_unified_events()
+	await process_frame
+
+	var mass_mitigate_event = null
+	for child in main.events_container.get_children():
+		if child.event_data.id == "uni_evt_mass_mitigate":
+			mass_mitigate_event = child
+			break
+
+	assert(mass_mitigate_event != null, "Mass Mitigation event spawned when 3 negative cards accumulate")
+
+	print("=== ALL REFINED UNIFIED GAME RUN TESTS PASSED SUCCESSFULLY! ===")
 	quit()
