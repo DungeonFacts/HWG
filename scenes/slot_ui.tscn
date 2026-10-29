@@ -3,33 +3,33 @@
 [ext_resource type="Script" uid="uid://h8xw3i1mnxh3" path="res://scripts/slot_ui.gd" id="1_slot"]
 
 [node name="SlotUI" type="PanelContainer"]
-custom_minimum_size = Vector2(170, 130)
-offset_right = 170.0
-offset_bottom = 130.0
+custom_minimum_size = Vector2(150, 85)
+offset_right = 150.0
+offset_bottom = 85.0
 script = ExtResource("1_slot")
 
 [node name="MarginContainer" type="MarginContainer" parent="."]
 layout_mode = 2
-theme_override_constants/margin_left = 6
-theme_override_constants/margin_top = 6
-theme_override_constants/margin_right = 6
-theme_override_constants/margin_bottom = 6
+theme_override_constants/margin_left = 4
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_bottom = 4
 
 [node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
 layout_mode = 2
-theme_override_constants/separation = 4
+theme_override_constants/separation = 2
 
 [node name="SlotTitleLabel" type="Label" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.9, 0.7, 1)
-theme_override_font_sizes/font_size = 13
+theme_override_font_sizes/font_size = 12
 text = "Slot Name"
 horizontal_alignment = 1
 
 [node name="ReqLabel" type="Label" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.6, 0.7, 0.8, 1)
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 10
 text = "Requires: [Tag]"
 horizontal_alignment = 1
 
@@ -41,7 +41,7 @@ size_flags_vertical = 3
 [node name="ClearButton" type="Button" parent="MarginContainer/VBoxContainer"]
 visible = false
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
-text = "Remove Card"
+theme_override_font_sizes/font_size = 10
+text = "Remove"
 
 [connection signal="pressed" from="MarginContainer/VBoxContainer/ClearButton" to="." method="_on_clear_button_pressed"]

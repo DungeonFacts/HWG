@@ -2,9 +2,9 @@ extends Control
 
 var current_turn: int = 1
 var current_stage: String = "Active"
-var active_experiment: int = 1 # 1, 2, 3, or 0 (Legacy)
+var active_experiment: int = 10 # 10 (Unified Run), 1, 2, 3, or 0 (Legacy)
 
-# Inventory data
+# Inventory data (Tableau)
 var inventory_cards: Array = []
 
 # Selected card for click-to-slot UI interaction
@@ -38,22 +38,45 @@ var wizard_card_def = {
 	"description": "The protector of the village. Knowledgeable in simple craft and rituals."
 }
 
-# State Trackers
+# Unified Run State Trackers
+var village_unrest: int = 0
+var village_favor: int = 0
+var spirit_favor: int = 0
+var arcane_insight: int = 0
+var great_work_progress: int = 0
+var totem_progress: int = 0
+var game_over: bool = false
+var game_over_reason: String = ""
+
+# Unified Run Event States
+var unified_blight_stage: int = 0 # 0=None, 1=Mild, 2=Severe, 3=Famine
+var unified_blight_resolved: bool = false
+var unified_merchant_stage: int = 0 # 0=None, 1=SunGem, 2=Leftovers
+var unified_merchant_resolved: bool = false
+var unified_child_active: bool = false
+var unified_child_resolved: bool = false
+var unified_smith_active: bool = false
+var unified_smith_resolved: bool = false
+var unified_spirit_shrine_active: bool = false
+var unified_spirit_shrine_resolved: bool = false
+var unified_storm_active: bool = false
+var unified_storm_resolved: bool = false
+
 # Experiment 1 State
 var exp1_yew_committed: bool = false
 
 # Experiment 2 State
-var exp2_wand_progress: int = 0 # 0, 1, 2, 3 (Completed)
-var exp2_blight_stage: int = 1 # 1 (Mild), 2 (Severe), 3 (Famine)
+var exp2_wand_progress: int = 0
+var exp2_blight_stage: int = 1
 var exp2_blight_resolved: bool = false
-var exp2_blacksmith_stage: int = 1 # 1 (Help Request), 2 (Grievance)
+var exp2_blacksmith_stage: int = 1
 var exp2_blacksmith_resolved: bool = false
-var exp2_merchant_stage: int = 1 # 1 (Sun-Gem), 2 (Leftovers)
+var exp2_merchant_stage: int = 1
 var exp2_merchant_resolved: bool = false
 
 # Experiment 3 State
 var exp3_wood_acquired: bool = false
-var exp3_chosen_path: String = "" # "patient", "spirit", "forester", "dark"
+var exp3_chosen_path: String = ""
 var exp3_patient_progress: int = 0
 
 # Legacy State
@@ -63,7 +86,7 @@ var gathering_turns_remaining: int = 0
 func _ready() -> void:
 	end_turn_button.pressed.connect(_on_end_turn_pressed)
 	_setup_exp_selector()
-	switch_experiment(1)
+	switch_experiment(10)
 
 func log_message(text: String) -> void:
 	if log_label:
@@ -71,6 +94,7 @@ func log_message(text: String) -> void:
 
 func _setup_exp_selector() -> void:
 	exp_selector.clear()
+	exp_selector.add_item("Unified Game Run (30-Min Run)", 10)
 	exp_selector.add_item("Exp 1: Scarcity & Competing Uses", 1)
 	exp_selector.add_item("Exp 2: Neglect & Evolving World", 2)
 	exp_selector.add_item("Exp 3: Multiple Paths to Power", 3)
@@ -85,6 +109,8 @@ func switch_experiment(exp_id: int) -> void:
 	active_experiment = exp_id
 	current_turn = 1
 	current_stage = "Active"
+	game_over = false
+	game_over_reason = ""
 	inventory_cards.clear()
 	_deselect_card()
 	_clear_events()
@@ -92,6 +118,8 @@ func switch_experiment(exp_id: int) -> void:
 		log_label.clear()
 
 	match exp_id:
+		10:
+			_setup_unified_run()
 		1:
 			_setup_experiment_1()
 		2:
@@ -104,18 +132,42 @@ func switch_experiment(exp_id: int) -> void:
 	_update_ui()
 
 func add_card_to_inventory(card_data: Dictionary) -> void:
-	inventory_cards.append(card_data)
+	var new_card = card_data.duplicate(true)
+	if not new_card.has("instance_id"):
+		new_card["instance_id"] = str(randi()) + "_" + str(new_card.get("id", "card"))
+	inventory_cards.append(new_card)
 	_refresh_inventory_ui()
 
 func remove_card_from_inventory(card_data: Dictionary) -> bool:
 	for i in range(inventory_cards.size()):
-		if inventory_cards[i].get("id") == card_data.get("id"):
+		var c = inventory_cards[i]
+		var match_id = false
+		if c.has("instance_id") and card_data.has("instance_id"):
+			match_id = (c["instance_id"] == card_data["instance_id"])
+		else:
+			match_id = (c.get("id") == card_data.get("id"))
+
+		if match_id:
 			inventory_cards.remove_at(i)
 			if selected_card_data == card_data:
 				_deselect_card()
 			_refresh_inventory_ui()
 			return true
 	return false
+
+func process_card_expiry() -> void:
+	var cards_to_remove = []
+	for card in inventory_cards:
+		if card.get("is_locked", false):
+			continue
+		if card.has("expires_in_turns"):
+			card["expires_in_turns"] -= 1
+			if card["expires_in_turns"] <= 0:
+				cards_to_remove.append(card)
+
+	for expired_card in cards_to_remove:
+		log_message("CARD EXPIRED: '" + expired_card.get("title", "Card") + "' has faded away.")
+		remove_card_from_inventory(expired_card)
 
 func _deselect_card() -> void:
 	selected_card_data = {}
@@ -134,6 +186,9 @@ func _refresh_inventory_ui() -> void:
 		card_inst.card_selected.connect(_on_inventory_card_selected)
 
 func _on_inventory_card_selected(card_ui) -> void:
+	if card_ui.card_data.get("is_locked", false):
+		log_message("Cannot select '" + card_ui.card_data.get("title", "Card") + "': Card is locked in an active event!")
+		return
 	if selected_card_ui == card_ui:
 		_deselect_card()
 	else:
@@ -147,7 +202,330 @@ func _update_ui() -> void:
 	turn_label.text = "Turn: " + str(current_turn)
 	stage_label.text = "Stage: " + current_stage
 	wizard_title_label.text = "Wizard: Elian"
-	wizard_desc_label.text = "Status: Active Guardian\nInventory Count: " + str(inventory_cards.size())
+
+	if active_experiment == 10:
+		wizard_desc_label.text = "Cards: " + str(inventory_cards.size()) + "\n" + \
+			"Village Favor: " + str(village_favor) + " | Unrest: " + str(village_unrest) + "/5\n" + \
+			"Spirit Favor: " + str(spirit_favor) + "/5 | Insight: " + str(arcane_insight)
+	else:
+		wizard_desc_label.text = "Status: Active Guardian\nCards in Hand: " + str(inventory_cards.size())
+
+# ==============================================================================
+# UNIFIED GAME RUN (30-MINUTE RECOMBINATORY RUN)
+# ==============================================================================
+func _setup_unified_run() -> void:
+	village_unrest = 0
+	village_favor = 0
+	spirit_favor = 0
+	arcane_insight = 0
+	great_work_progress = 0
+	totem_progress = 0
+	game_over = false
+
+	unified_blight_stage = 1
+	unified_blight_resolved = false
+	unified_merchant_stage = 1
+	unified_merchant_resolved = false
+	unified_child_active = false
+	unified_child_resolved = false
+	unified_smith_active = false
+	unified_smith_resolved = false
+	unified_spirit_shrine_active = false
+	unified_spirit_shrine_resolved = false
+	unified_storm_active = false
+	unified_storm_resolved = false
+
+	exp_title_label.text = "Hedge Wizard — Unified Recombinatory Run"
+	exp_desc_label.text = "Assign cards to events, then click End Turn. Manage village unrest, spirit favor, and complete the Great Work of Magick!"
+
+	log_message("=== UNIFIED GAME RUN INITIALIZED ===")
+	log_message("Welcome, Hedge Wizard. Allocate your cards across active situations before clicking End Turn.")
+
+	add_card_to_inventory(wizard_card_def.duplicate())
+	add_card_to_inventory({
+		"id": "silver_shilling",
+		"title": "Silver Shilling",
+		"tag": "currency",
+		"description": "Hard coin earned from trade."
+	})
+	add_card_to_inventory({
+		"id": "medicinal_herb",
+		"title": "Medicinal Herb",
+		"tag": "herb",
+		"description": "A healing forest plant."
+	})
+	add_card_to_inventory({
+		"id": "forbidden_grimoire",
+		"title": "Forbidden Grimoire",
+		"tag": "grimoire",
+		"description": "A dark tome containing esoteric arcane knowledge."
+	})
+
+	_refresh_unified_events()
+
+func _refresh_unified_events() -> void:
+	_clear_events()
+
+	if game_over:
+		return
+
+	# Permanent Activity 1: Forage Sacred Woods
+	_add_event({
+		"id": "uni_act_forage",
+		"title": "Activity: Forage Sacred Woods",
+		"description": "Slot Wizard to gather medicinal herbs or yew wood from the surrounding forests.",
+		"deadline": -1,
+		"slots": [
+			{"id": "wizard_slot", "label": "Wizard", "req_tag": "wizard"}
+		],
+		"actions": [
+			{"id": "uni_forage", "label": "Forage Woods (1 Turn)", "required_slots": ["wizard_slot"]}
+		]
+	})
+
+	# Permanent Activity 2: Study Grimoire
+	_add_event({
+		"id": "uni_act_study",
+		"title": "Activity: Study Forbidden Grimoire",
+		"description": "Slot Wizard + Grimoire to decode ancient runes and gain Arcane Insight.",
+		"deadline": -1,
+		"slots": [
+			{"id": "wizard_slot", "label": "Wizard", "req_tag": "wizard"},
+			{"id": "grimoire_slot", "label": "Grimoire", "req_tag": "grimoire"}
+		],
+		"actions": [
+			{"id": "uni_study", "label": "Study Grimoire", "required_slots": ["wizard_slot", "grimoire_slot"]}
+		]
+	})
+
+	# Permanent Activity 3: Brew Potent Remedy
+	_add_event({
+		"id": "uni_act_brew",
+		"title": "Activity: Brew Potent Remedy",
+		"description": "Slot Wizard + Medicinal Herb to brew a miracle potion.",
+		"deadline": -1,
+		"slots": [
+			{"id": "wizard_slot", "label": "Wizard", "req_tag": "wizard"},
+			{"id": "herb_slot", "label": "Herb", "req_tag": "herb"}
+		],
+		"actions": [
+			{"id": "uni_brew", "label": "Brew Potion", "required_slots": ["wizard_slot", "herb_slot"]}
+		]
+	})
+
+	# Ambition 1: Carve Spirit Totem (Multi-turn 2 turns)
+	if totem_progress < 2:
+		_add_event({
+			"id": "uni_amb_totem",
+			"title": "Ambition: Carve Spirit Totem (" + str(totem_progress) + "/2)",
+			"description": "Slot Wizard + Wood to carve a totem honoring nature spirits. (Progress saved if paused).",
+			"deadline": -1,
+			"slots": [
+				{"id": "wizard_slot", "label": "Wizard", "req_tag": "wizard"},
+				{"id": "wood_slot", "label": "Wood / Yew", "req_tag": "yew_heartwood"}
+			],
+			"actions": [
+				{"id": "uni_work_totem", "label": "Carve Totem (1 Turn)", "required_slots": ["wizard_slot", "wood_slot"]}
+			]
+		})
+
+	# Ambition 2: The Great Work of Magick (Win Condition, Multi-turn 3 turns)
+	if great_work_progress < 3:
+		_add_event({
+			"id": "uni_amb_great_work",
+			"title": "Masterpiece: The Great Work of Magick (" + str(great_work_progress) + "/3)",
+			"description": "Channel supreme magic into a masterpiece ritual. Requires Wizard + Arcane Insight card or Gem.",
+			"deadline": -1,
+			"slots": [
+				{"id": "wizard_slot", "label": "Wizard", "req_tag": "wizard"},
+				{"id": "reagent_slot", "label": "Insight / Artifact", "req_tag": "any"}
+			],
+			"actions": [
+				{"id": "uni_work_great_work", "label": "Perform Ritual (1 Turn)", "required_slots": ["wizard_slot", "reagent_slot"]}
+			]
+		})
+
+	# --- DYNAMIC DECK EVENT DRAWS ---
+	# 1. Crop Blight Escalation
+	if not unified_blight_resolved:
+		if unified_blight_stage == 1:
+			_add_event({
+				"id": "uni_evt_blight",
+				"title": "[World] Mild Crop Blight",
+				"description": "Fungus threatens crops! Option A: Cure with Medicinal Herb. Option B: Cleanse with Wizard.",
+				"deadline": 2,
+				"slots": [
+					{"id": "herb_slot", "label": "Medicinal Herb", "req_tag": "herb"},
+					{"id": "wizard_slot", "label": "Wizard", "req_tag": "wizard"}
+				],
+				"actions": [
+					{"id": "uni_blight_herb", "label": "Apply Herb", "required_slots": ["herb_slot"]},
+					{"id": "uni_blight_wiz", "label": "Wizard Ritual", "required_slots": ["wizard_slot"]}
+				]
+			})
+		elif unified_blight_stage == 2:
+			_add_event({
+				"id": "uni_evt_blight",
+				"title": "[World] SEVERE Crop Blight!",
+				"description": "NEGLECT CONSEQUENCE: Blight has spread! Requires Wizard + Herb to cleanse, OR Dark Grimoire ritual.",
+				"deadline": 1,
+				"slots": [
+					{"id": "wizard_slot", "label": "Wizard", "req_tag": "wizard"},
+					{"id": "herb_slot", "label": "Medicinal Herb", "req_tag": "herb"},
+					{"id": "grimoire_slot", "label": "Grimoire", "req_tag": "grimoire"}
+				],
+				"actions": [
+					{"id": "uni_blight_cleanse", "label": "Cleanse (Wizard + Herb)", "required_slots": ["wizard_slot", "herb_slot"]},
+					{"id": "uni_blight_dark", "label": "Dark Blood Cleanse (Grimoire)", "required_slots": ["wizard_slot", "grimoire_slot"]}
+				]
+			})
+
+	# 2. Wandering Merchant
+	if not unified_merchant_resolved and current_turn <= 4:
+		if unified_merchant_stage == 1:
+			_add_event({
+				"id": "uni_evt_merchant",
+				"title": "[Opportunity] Wandering Merchant: Sun-Gem",
+				"description": "Merchant sells a radiant Sun-Gem for 1 Silver Shilling.",
+				"deadline": 1,
+				"slots": [
+					{"id": "silver_slot", "label": "Silver Shilling", "req_tag": "currency"}
+				],
+				"actions": [
+					{"id": "uni_buy_sungem", "label": "Buy Sun-Gem (1 Silver)", "required_slots": ["silver_slot"]}
+				]
+			})
+		elif unified_merchant_stage == 2:
+			_add_event({
+				"id": "uni_evt_merchant",
+				"title": "[Opportunity] Merchant's Leftovers",
+				"description": "Sun-Gem was sold! Merchant now sells Scrap Metal for 1 Silver Shilling.",
+				"deadline": 1,
+				"slots": [
+					{"id": "silver_slot", "label": "Silver Shilling", "req_tag": "currency"}
+				],
+				"actions": [
+					{"id": "uni_buy_scrap", "label": "Buy Scrap Metal (1 Silver)", "required_slots": ["silver_slot"]}
+				]
+			})
+
+	# 3. Sick Villager Child (Spawns turn >= 2)
+	if current_turn >= 2 and not unified_child_resolved and not unified_child_active:
+		unified_child_active = true
+
+	if unified_child_active and not unified_child_resolved:
+		_add_event({
+			"id": "uni_evt_child",
+			"title": "[Petitioner] Sick Villager Child",
+			"description": "A distraught mother seeks help for her feverish child. Option A: Potent Remedy. Option B: Wizard Ritual.",
+			"deadline": 2,
+			"slots": [
+				{"id": "remedy_slot", "label": "Potent Remedy", "req_tag": "remedy"},
+				{"id": "wizard_slot", "label": "Wizard", "req_tag": "wizard"}
+			],
+			"actions": [
+				{"id": "uni_heal_remedy", "label": "Give Remedy", "required_slots": ["remedy_slot"]},
+				{"id": "uni_heal_wiz", "label": "Heal Ritual (Wizard)", "required_slots": ["wizard_slot"]}
+			]
+		})
+
+	# 4. Blacksmith Anomaly (Spawns turn >= 3)
+	if current_turn >= 3 and not unified_smith_resolved and not unified_smith_active:
+		unified_smith_active = true
+
+	if unified_smith_active and not unified_smith_resolved:
+		_add_event({
+			"id": "uni_evt_smith",
+			"title": "[Petitioner] Blacksmith's Forge Anomaly",
+			"description": "Blacksmith asks for aid with a strange forge heat. Option A: Wizard help. Option B: Pay 1 Silver for materials.",
+			"deadline": 2,
+			"slots": [
+				{"id": "wizard_slot", "label": "Wizard", "req_tag": "wizard"},
+				{"id": "silver_slot", "label": "Silver Shilling", "req_tag": "currency"}
+			],
+			"actions": [
+				{"id": "uni_smith_wiz", "label": "Cool Forge (Wizard)", "required_slots": ["wizard_slot"]},
+				{"id": "uni_smith_silver", "label": "Pay Materials (1 Silver)", "required_slots": ["silver_slot"]}
+			]
+		})
+
+	# 5. Sylph Spirit Shrine (Spawns turn >= 4)
+	if current_turn >= 4 and not unified_spirit_shrine_resolved and not unified_spirit_shrine_active:
+		unified_spirit_shrine_active = true
+
+	if unified_spirit_shrine_active and not unified_spirit_shrine_resolved:
+		_add_event({
+			"id": "uni_evt_spirit",
+			"title": "[Shrine] Sylph Spirit Apparition",
+			"description": "A nature spirit manifests. Offer Herbal Infusion for Spirit Favor, or Silver for a Forest Blessing.",
+			"deadline": 2,
+			"slots": [
+				{"id": "herb_slot", "label": "Herb / Offering", "req_tag": "herb"},
+				{"id": "silver_slot", "label": "Silver Shilling", "req_tag": "currency"}
+			],
+			"actions": [
+				{"id": "uni_spirit_herb", "label": "Offer Herb (+1 Spirit Favor)", "required_slots": ["herb_slot"]},
+				{"id": "uni_spirit_silver", "label": "Offer Silver (Forest Blessing)", "required_slots": ["silver_slot"]}
+			]
+		})
+
+	# 6. Valley Shadow Storm Crisis (Spawns turn >= 5)
+	if current_turn >= 5 and not unified_storm_resolved and not unified_storm_active:
+		unified_storm_active = true
+
+	if unified_storm_active and not unified_storm_resolved:
+		_add_event({
+			"id": "uni_evt_storm",
+			"title": "[CRISIS] Valley Shadow Storm!",
+			"description": "Dark forces storm the valley! Resolve with Wizard + Sun-Gem, Potent Remedy, OR Forest Blessing.",
+			"deadline": 2,
+			"slots": [
+				{"id": "wizard_slot", "label": "Wizard", "req_tag": "wizard"},
+				{"id": "boon_slot", "label": "Gem / Remedy / Blessing", "req_tag": "any"}
+			],
+			"actions": [
+				{"id": "uni_ward_storm", "label": "Repel Shadow Storm", "required_slots": ["wizard_slot", "boon_slot"]}
+			]
+		})
+
+func _check_unified_win_loss() -> void:
+	if game_over:
+		return
+
+	if village_unrest >= 5:
+		game_over = true
+		current_stage = "DEFEAT"
+		log_message("\n==========================================")
+		log_message("DEFEAT: Village Mob Revolt! Unrest reached max limit. Villagers banished you.")
+		log_message("==========================================")
+
+	elif spirit_favor <= -3:
+		game_over = true
+		current_stage = "DEFEAT"
+		log_message("\n==========================================")
+		log_message("DEFEAT: Wrath of the Spirits! Angry spirits cursed your realm.")
+		log_message("==========================================")
+
+	elif spirit_favor >= 5:
+		game_over = true
+		current_stage = "VICTORY"
+		log_message("\n==========================================")
+		log_message("VICTORY! Favored Scion of the Rain God! Eternal divine favor achieved!")
+		log_message("==========================================")
+
+	elif great_work_progress >= 3:
+		game_over = true
+		current_stage = "VICTORY"
+		log_message("\n==========================================")
+		log_message("VICTORY! Completed the Great Work of Magick! You are a Legendary Archmage!")
+		log_message("==========================================")
+
+	elif current_turn >= 15 and village_unrest < 3 and spirit_favor >= 0:
+		game_over = true
+		current_stage = "VICTORY"
+		log_message("\n==========================================")
+		log_message("VICTORY! Guardian of the Realm! You protected the valley for 15 turns in balance.")
+		log_message("==========================================")
 
 # ==============================================================================
 # EXPERIMENT 1: SCARCITY AND COMPETING USES
@@ -454,7 +832,6 @@ func _refresh_exp3_events() -> void:
 	_clear_events()
 
 	if not exp3_wood_acquired:
-		# Path 1: Patient Forestry (3 turns)
 		_add_event({
 			"id": "exp3_path_patient",
 			"title": "Path 1: Patient Stewardship (" + str(exp3_patient_progress) + "/3)",
@@ -468,7 +845,6 @@ func _refresh_exp3_events() -> void:
 			]
 		})
 
-		# Path 2: Spirit Bargain (1 turn)
 		_add_event({
 			"id": "exp3_path_spirit",
 			"title": "Path 2: Bargain with Sylph Spirit",
@@ -483,7 +859,6 @@ func _refresh_exp3_events() -> void:
 			]
 		})
 
-		# Path 3: Hire Local Forester (1 turn)
 		_add_event({
 			"id": "exp3_path_forester",
 			"title": "Path 3: Hire Local Forester",
@@ -497,7 +872,6 @@ func _refresh_exp3_events() -> void:
 			]
 		})
 
-		# Path 4: Dark Blight Ritual (0 turns - Instant)
 		_add_event({
 			"id": "exp3_path_dark",
 			"title": "Path 4: Forbidden Blight Ritual",
@@ -512,7 +886,6 @@ func _refresh_exp3_events() -> void:
 			]
 		})
 	else:
-		# Concluding Archmage Trial
 		_add_event({
 			"id": "exp3_trial_event",
 			"title": "Concluding Trial: The Archmage Test",
@@ -656,13 +1029,172 @@ func _on_event_slot_clicked(_event_ui, slot_ui) -> void:
 			log_message("Slot is already occupied.")
 	elif not slot_ui.slotted_card_data.is_empty():
 		var removed = slot_ui.clear_slot()
-		log_message("Removed card '" + removed.get("title", "") + "' from " + slot_ui.slot_label_text)
+		if not removed.is_empty():
+			log_message("Removed card '" + removed.get("title", "") + "' from " + slot_ui.slot_label_text)
 
 func _on_event_action_triggered(event_ui, action_id: String) -> void:
 	var slotted = event_ui.get_slotted_cards()
 
+	# --- UNIFIED GAME RUN ACTIONS ---
+	if action_id == "uni_forage":
+		event_ui.clear_all_slots()
+		if randf() > 0.5:
+			add_card_to_inventory({"id": "medicinal_herb", "title": "Medicinal Herb", "tag": "herb", "description": "Fresh forest healing herb."})
+			log_message("FORAGE RESULT: Gathered a Medicinal Herb from the woods.")
+		else:
+			add_card_to_inventory({"id": "yew_heartwood", "title": "Yew Heartwood", "tag": "yew_heartwood", "description": "Dense, rare magical timber."})
+			log_message("FORAGE RESULT: Discovered rare Yew Heartwood!")
+
+	elif action_id == "uni_study":
+		event_ui.clear_all_slots()
+		arcane_insight += 1
+		add_card_to_inventory({"id": "arcane_insight", "title": "Arcane Insight", "tag": "insight", "description": "Decoded rune knowledge."})
+		log_message("STUDY RESULT: Decoded ancient secrets! Arcane Insight is now " + str(arcane_insight) + ".")
+
+	elif action_id == "uni_brew":
+		remove_card_from_inventory(slotted.get("herb_slot", {}))
+		event_ui.clear_all_slots()
+		add_card_to_inventory({"id": "potent_remedy", "title": "Potent Remedy", "tag": "remedy", "description": "A powerful restorative potion."})
+		log_message("BREWING: Crafted Potent Remedy from Medicinal Herb!")
+
+	elif action_id == "uni_work_totem":
+		totem_progress += 1
+		log_message("TOTEM AMBITION: Worked on Spirit Totem (" + str(totem_progress) + "/2 turns).")
+		if totem_progress < 2:
+			for slot_key in slotted:
+				var c = slotted[slot_key]
+				if not c.is_empty():
+					c["is_locked"] = true
+			_refresh_inventory_ui()
+		else:
+			for slot_key in slotted:
+				var c = slotted[slot_key]
+				if not c.is_empty():
+					c["is_locked"] = false
+			remove_card_from_inventory(slotted.get("wood_slot", {}))
+			event_ui.clear_all_slots()
+			spirit_favor += 2
+			add_card_to_inventory({"id": "totem_blessing", "title": "Spirit Totem Blessing", "tag": "boon", "description": "Sacred blessing from forest spirits."})
+			log_message("TOTEM COMPLETED! Spirit Favor increased by 2! (Spirit Favor: " + str(spirit_favor) + ").")
+		_refresh_unified_events()
+
+	elif action_id == "uni_work_great_work":
+		remove_card_from_inventory(slotted.get("reagent_slot", {}))
+		event_ui.clear_all_slots()
+		great_work_progress += 1
+		log_message("GREAT WORK RITUAL: Progress advanced (" + str(great_work_progress) + "/3 turns).")
+		_check_unified_win_loss()
+		_refresh_unified_events()
+
+	elif action_id == "uni_blight_herb":
+		remove_card_from_inventory(slotted.get("herb_slot", {}))
+		event_ui.clear_all_slots()
+		unified_blight_resolved = true
+		village_favor += 1
+		log_message("WORLD RESPONSE: Cured Mild Crop Blight with Medicinal Herb! (+1 Village Favor).")
+		_refresh_unified_events()
+
+	elif action_id == "uni_blight_wiz":
+		event_ui.clear_all_slots()
+		unified_blight_resolved = true
+		log_message("WORLD RESPONSE: Wizard cleansed Crop Blight.")
+		_refresh_unified_events()
+
+	elif action_id == "uni_blight_cleanse":
+		remove_card_from_inventory(slotted.get("herb_slot", {}))
+		event_ui.clear_all_slots()
+		unified_blight_resolved = true
+		village_favor += 1
+		log_message("WORLD RESPONSE: Cleanse ritual saved the crops from Severe Blight!")
+		_refresh_unified_events()
+
+	elif action_id == "uni_blight_dark":
+		remove_card_from_inventory(slotted.get("grimoire_slot", {}))
+		event_ui.clear_all_slots()
+		unified_blight_resolved = true
+		spirit_favor -= 2
+		add_card_to_inventory({"id": "blighted_soil", "title": "Blighted Soil", "tag": "path_constraint", "description": "Corrupted soil; angry spirits curse your blood magic."})
+		log_message("DARK RITUAL: Sacrificed soil life to save crops! Spirit Favor lowered by 2.")
+		_check_unified_win_loss()
+		_refresh_unified_events()
+
+	elif action_id == "uni_buy_sungem":
+		remove_card_from_inventory(slotted.get("silver_slot", {}))
+		event_ui.clear_all_slots()
+		unified_merchant_resolved = true
+		add_card_to_inventory({"id": "sun_gem", "title": "Rare Sun-Gem", "tag": "artifact", "description": "A radiant artifact gem."})
+		log_message("MERCHANT TRADE: Purchased Rare Sun-Gem!")
+		_refresh_unified_events()
+
+	elif action_id == "uni_buy_scrap":
+		remove_card_from_inventory(slotted.get("silver_slot", {}))
+		event_ui.clear_all_slots()
+		unified_merchant_resolved = true
+		add_card_to_inventory({"id": "scrap_metal", "title": "Scrap Metal", "tag": "material", "description": "Melted metal scrap."})
+		log_message("MERCHANT TRADE: Purchased Scrap Metal!")
+		_refresh_unified_events()
+
+	elif action_id == "uni_heal_remedy":
+		remove_card_from_inventory(slotted.get("remedy_slot", {}))
+		event_ui.clear_all_slots()
+		unified_child_resolved = true
+		village_favor += 2
+		if village_unrest > 0: village_unrest -= 1
+		add_card_to_inventory({"id": "village_gratitude", "title": "Village Gratitude", "tag": "boon", "description": "The mother's eternal blessing."})
+		log_message("HEALING RESULT: Cured the sick child! (+2 Village Favor, -1 Unrest).")
+		_refresh_unified_events()
+
+	elif action_id == "uni_heal_wiz":
+		event_ui.clear_all_slots()
+		unified_child_resolved = true
+		village_favor += 1
+		log_message("HEALING RESULT: Wizard restored the child's health!")
+		_refresh_unified_events()
+
+	elif action_id == "uni_smith_wiz":
+		event_ui.clear_all_slots()
+		unified_smith_resolved = true
+		village_favor += 1
+		log_message("PETITION RESOLVED: Cool forge anomaly for Blacksmith!")
+		_refresh_unified_events()
+
+	elif action_id == "uni_smith_silver":
+		remove_card_from_inventory(slotted.get("silver_slot", {}))
+		event_ui.clear_all_slots()
+		unified_smith_resolved = true
+		village_favor += 1
+		log_message("PETITION RESOLVED: Bought forge metal for Blacksmith!")
+		_refresh_unified_events()
+
+	elif action_id == "uni_spirit_herb":
+		remove_card_from_inventory(slotted.get("herb_slot", {}))
+		event_ui.clear_all_slots()
+		unified_spirit_shrine_resolved = true
+		spirit_favor += 1
+		log_message("SHRINE SACRIFICE: Offered Herb to Sylph Spirit! (+1 Spirit Favor).")
+		_check_unified_win_loss()
+		_refresh_unified_events()
+
+	elif action_id == "uni_spirit_silver":
+		remove_card_from_inventory(slotted.get("silver_slot", {}))
+		event_ui.clear_all_slots()
+		unified_spirit_shrine_resolved = true
+		add_card_to_inventory({"id": "forest_blessing", "title": "Forest Blessing", "tag": "boon", "description": "Divine protection of Sylph Spirit."})
+		log_message("SHRINE BLESSING: Received Forest Blessing!")
+		_refresh_unified_events()
+
+	elif action_id == "uni_ward_storm":
+		remove_card_from_inventory(slotted.get("boon_slot", {}))
+		event_ui.clear_all_slots()
+		unified_storm_resolved = true
+		village_favor += 2
+		spirit_favor += 1
+		log_message("CRISIS RESOLVED: Successfully repelled the Valley Shadow Storm!")
+		_check_unified_win_loss()
+		_refresh_unified_events()
+
 	# --- EXPERIMENT 1 ACTIONS ---
-	if action_id == "exp1_craft_wand":
+	elif action_id == "exp1_craft_wand":
 		var yew_card = slotted.get("wood_slot", {})
 		remove_card_from_inventory(yew_card)
 		event_ui.clear_all_slots()
@@ -818,19 +1350,6 @@ func _on_event_action_triggered(event_ui, action_id: String) -> void:
 		_clear_events()
 		current_stage = "COMPLETE"
 		log_message("\n=== EXPERIMENT 3 COMPLETED ===")
-		match exp3_chosen_path:
-			"patient":
-				log_message("TITLE EARNED: 'Elian the Patient Scholar'")
-				log_message("OUTCOME: Passed trial with pristine harmony! The woods and villagers flourish in balance.")
-			"spirit":
-				log_message("TITLE EARNED: 'Elian the Bound Mystic'")
-				log_message("OUTCOME: Passed trial under Spirit Vow! Immense power gained, but bound by eternal nature taboos.")
-			"forester":
-				log_message("TITLE EARNED: 'Elian the Mortal Patron'")
-				log_message("OUTCOME: Passed trial with mortal aid! Entangled in village debts and mortal politics.")
-			"dark":
-				log_message("TITLE EARNED: 'Elian the Dread Sorcerer'")
-				log_message("OUTCOME: Passed trial through raw dark power! Feared by all, surrounded by blighted earth.")
 
 	# --- LEGACY ACTIONS ---
 	elif action_id == "resolve_craft_talisman":
@@ -877,11 +1396,59 @@ func _on_event_action_triggered(event_ui, action_id: String) -> void:
 	_update_ui()
 
 func _on_end_turn_pressed() -> void:
+	if game_over:
+		return
+
+	# 1. Resolve all staged event actions
+	var staged_resolutions = []
+	for event_inst in events_container.get_children():
+		var staged_action = event_inst.get_staged_action_id()
+		if staged_action != "":
+			staged_resolutions.append({"event": event_inst, "action_id": staged_action})
+
+	for res in staged_resolutions:
+		if is_instance_valid(res["event"]):
+			_on_event_action_triggered(res["event"], res["action_id"])
+
+	# 2. Process decaying cards in tableau
+	process_card_expiry()
+
 	current_turn += 1
 	log_message("\nAdvanced to Turn " + str(current_turn) + ".")
 
+	# Unified Game Run Escalation
+	if active_experiment == 10:
+		if not unified_blight_resolved:
+			if unified_blight_stage == 1:
+				unified_blight_stage = 2
+				log_message("WORLD EVOLUTION: Crop Blight was neglected! It has spread into SEVERE Blight!")
+			elif unified_blight_stage == 2:
+				unified_blight_stage = 3
+				village_unrest += 2
+				add_card_to_inventory({"id": "villager_grievance", "title": "Villager Grievance", "tag": "grievance", "description": "Villagers suffer famine and blame you."})
+				log_message("WORLD EVOLUTION: Severe Blight resulted in Crop Rot & Famine! (+2 Village Unrest).")
+
+		if not unified_merchant_resolved and unified_merchant_stage == 1:
+			unified_merchant_stage = 2
+			log_message("WORLD EVOLUTION: Wandering Merchant's Sun-Gem was bought by a rival!")
+
+		if unified_child_active and not unified_child_resolved:
+			village_unrest += 1
+			add_card_to_inventory({"id": "villager_grievance", "title": "Villager Grievance", "tag": "grievance", "description": "Mother holds a grievance for your neglect."})
+			log_message("WORLD EVOLUTION: Distraught mother holds a grievance against you! (+1 Village Unrest).")
+			unified_child_resolved = true
+
+		if unified_smith_active and not unified_smith_resolved:
+			village_unrest += 1
+			add_card_to_inventory({"id": "resentful_blacksmith", "title": "Resentful Blacksmith", "tag": "grievance", "description": "Blacksmith's forge was damaged."})
+			log_message("WORLD EVOLUTION: Blacksmith's forge was damaged! (+1 Village Unrest).")
+			unified_smith_resolved = true
+
+		_check_unified_win_loss()
+		_refresh_unified_events()
+
 	# Legacy Gathering Task
-	if active_experiment == 0 and gathering_task_active:
+	elif active_experiment == 0 and gathering_task_active:
 		gathering_turns_remaining -= 1
 		if gathering_turns_remaining <= 0:
 			gathering_task_active = false
@@ -892,7 +1459,7 @@ func _on_end_turn_pressed() -> void:
 			log_message("Task Progress: Gathering Herbs in progress... (" + str(gathering_turns_remaining) + " turns remaining).")
 
 	# Experiment 2 Escalation Engine
-	if active_experiment == 2:
+	elif active_experiment == 2:
 		if not exp2_blight_resolved:
 			if exp2_blight_stage == 1:
 				exp2_blight_stage = 2

@@ -95,20 +95,11 @@ func _on_slot_changed(_slot_ui, _card_data: Dictionary) -> void:
 	_update_action_buttons()
 	slot_card_changed.emit(self)
 
-func _update_action_buttons() -> void:
-	for child in action_buttons_container.get_children():
-		child.queue_free()
-
+func get_staged_action_id() -> String:
 	var actions_def = event_data.get("actions", [])
 	for action_def in actions_def:
-		var action_id = action_def.get("id", "act")
-		var action_label = action_def.get("label", "Resolve")
+		var action_id = action_def.get("id", "")
 		var required_slots = action_def.get("required_slots", [])
-
-		var btn = Button.new()
-		btn.text = action_label
-
-		# Check if all required slots are filled
 		var can_execute = true
 		for req_slot_id in required_slots:
 			var found_filled = false
@@ -119,9 +110,29 @@ func _update_action_buttons() -> void:
 			if not found_filled:
 				can_execute = false
 				break
+		if can_execute and not required_slots.is_empty():
+			return action_id
+	return ""
 
-		btn.disabled = not can_execute
-		btn.pressed.connect(func(): action_triggered.emit(self, action_id))
+func _update_action_buttons() -> void:
+	for child in action_buttons_container.get_children():
+		child.queue_free()
+
+	var staged_id = get_staged_action_id()
+	var actions_def = event_data.get("actions", [])
+	for action_def in actions_def:
+		var action_id = action_def.get("id", "act")
+		var action_label = action_def.get("label", "Resolve")
+
+		var btn = Button.new()
+		if action_id == staged_id:
+			btn.text = "[STAGED FOR END TURN] " + action_label
+			btn.add_theme_color_override("font_color", Color(0.4, 1.0, 0.5))
+		else:
+			btn.text = action_label
+
+		# Disable direct clicking during turn so resolution occurs strictly on End Turn
+		btn.disabled = true
 		action_buttons_container.add_child(btn)
 
 func get_slotted_cards() -> Dictionary:
