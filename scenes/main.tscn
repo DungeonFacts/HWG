@@ -40,36 +40,69 @@ layout_mode = 2
 [node name="TitleLabel" type="Label" parent="VBox/TopBar"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.85, 0.5, 1)
-theme_override_font_sizes/font_size = 20
-text = "HEDGE WIZARD"
+theme_override_font_sizes/font_size = 18
+text = "HEDGE WIZARD: LAB"
 
 [node name="VSeparator" type="VSeparator" parent="VBox/TopBar"]
+layout_mode = 2
+
+[node name="ExpSelector" type="OptionButton" parent="VBox/TopBar"]
+custom_minimum_size = Vector2(240, 36)
+layout_mode = 2
+
+[node name="VSeparator2" type="VSeparator" parent="VBox/TopBar"]
 layout_mode = 2
 
 [node name="TurnLabel" type="Label" parent="VBox/TopBar"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
-theme_override_font_sizes/font_size = 16
+theme_override_font_sizes/font_size = 15
 text = "Turn: 1"
 
-[node name="VSeparator2" type="VSeparator" parent="VBox/TopBar"]
+[node name="VSeparator3" type="VSeparator" parent="VBox/TopBar"]
 layout_mode = 2
 
 [node name="StageLabel" type="Label" parent="VBox/TopBar"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.9, 0.7, 1)
-theme_override_font_sizes/font_size = 16
-text = "Stage: A"
+theme_override_font_sizes/font_size = 15
+text = "Stage: Active"
 
 [node name="Control" type="Control" parent="VBox/TopBar"]
 layout_mode = 2
 size_flags_horizontal = 3
 
 [node name="EndTurnButton" type="Button" parent="VBox/TopBar"]
-custom_minimum_size = Vector2(140, 36)
+custom_minimum_size = Vector2(130, 36)
 layout_mode = 2
 theme_override_font_sizes/font_size = 15
 text = "End Turn >>"
+
+[node name="ExpInfoPanel" type="PanelContainer" parent="VBox"]
+layout_mode = 2
+
+[node name="MarginContainer" type="MarginContainer" parent="VBox/ExpInfoPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 8
+
+[node name="VBox" type="VBoxContainer" parent="VBox/ExpInfoPanel/MarginContainer"]
+layout_mode = 2
+
+[node name="ExpTitleLabel" type="Label" parent="VBox/ExpInfoPanel/MarginContainer/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.8, 0.4, 1)
+theme_override_font_sizes/font_size = 15
+text = "Experiment 1: Scarcity and Competing Uses"
+
+[node name="ExpDescLabel" type="Label" parent="VBox/ExpInfoPanel/MarginContainer/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.8, 0.85, 0.9, 1)
+theme_override_font_sizes/font_size = 13
+text = "Design Hypothesis: Testing whether genuine resource scarcity with multiple competing uses creates gameplay tension without countdown timers."
+autowrap_mode = 2
 
 [node name="MainSplit" type="HSplitContainer" parent="VBox"]
 layout_mode = 2
@@ -136,7 +169,7 @@ size_flags_vertical = 3
 theme_override_constants/separation = 12
 
 [node name="LogPanel" type="PanelContainer" parent="VBox"]
-custom_minimum_size = Vector2(0, 140)
+custom_minimum_size = Vector2(0, 130)
 layout_mode = 2
 
 [node name="LogMargin" type="MarginContainer" parent="VBox/LogPanel"]

@@ -4,10 +4,14 @@ func _init():
 	call_deferred("_run_test")
 
 func _run_test():
-	print("=== Running Full Scenario Integration Test ===")
+	print("=== Running Full Legacy Scenario Integration Test ===")
 	var main_scene = load("res://scenes/main.tscn")
 	var main = main_scene.instantiate()
 	root.add_child(main)
+	await process_frame
+
+	# Switch to Legacy Scenario (Stage A)
+	main.switch_experiment(0)
 	await process_frame
 
 	# 1. Stage A: Craft Talisman
