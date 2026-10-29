@@ -9,7 +9,7 @@ var is_in_slot: bool = false
 
 @onready var title_label: Label = $MarginContainer/VBoxContainer/TitleLabel
 @onready var tag_label: Label = $MarginContainer/VBoxContainer/TagLabel
-@onready var desc_label: Label = $MarginContainer/VBoxContainer/DescLabel
+@onready var expiry_label: Label = get_node_or_null("MarginContainer/VBoxContainer/ExpiryLabel")
 
 func setup(p_card_data: Dictionary, p_in_slot: bool = false) -> void:
 	card_data = p_card_data
@@ -22,12 +22,29 @@ func update_ui() -> void:
 	if card_data.is_empty():
 		title_label.text = ""
 		tag_label.text = ""
-		desc_label.text = ""
+		tooltip_text = ""
 		return
 
-	title_label.text = card_data.get("title", "Unknown Card")
+	var title_text = card_data.get("title", "Unknown Card")
+	if card_data.get("is_locked", false):
+		title_text += " [LOCKED]"
+	title_label.text = title_text
+
 	tag_label.text = "[" + card_data.get("tag", "item").capitalize() + "]"
-	desc_label.text = card_data.get("description", "")
+
+	if expiry_label:
+		if card_data.has("expires_in_turns") and card_data["expires_in_turns"] >= 0:
+			expiry_label.visible = true
+			expiry_label.text = "Expires: " + str(card_data["expires_in_turns"]) + "t"
+		else:
+			expiry_label.visible = false
+
+	# Tooltip contains full description and tags
+	var tooltip_content = title_text + "\nTag: " + card_data.get("tag", "item") + "\n"
+	if card_data.has("expires_in_turns"):
+		tooltip_content += "Expires in: " + str(card_data["expires_in_turns"]) + " turn(s)\n"
+	tooltip_content += "\n" + card_data.get("description", "")
+	tooltip_text = tooltip_content
 
 	_update_style()
 

@@ -45,6 +45,12 @@ func update_ui() -> void:
 	else:
 		card_container.visible = true
 		clear_button.visible = true
+		if slotted_card_data.get("is_locked", false):
+			clear_button.disabled = true
+			clear_button.text = "Locked"
+		else:
+			clear_button.disabled = false
+			clear_button.text = "Remove"
 		req_label.visible = false
 
 		var card_inst = card_ui_scene.instantiate()
@@ -97,6 +103,8 @@ func slot_card(card_data: Dictionary) -> bool:
 
 func clear_slot() -> Dictionary:
 	if slotted_card_data.is_empty():
+		return {}
+	if slotted_card_data.get("is_locked", false):
 		return {}
 	var removed_card = slotted_card_data
 	slotted_card_data = {}
