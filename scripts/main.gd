@@ -61,6 +61,14 @@ var unified_spirit_shrine_active: bool = false
 var unified_spirit_shrine_resolved: bool = false
 var unified_storm_active: bool = false
 var unified_storm_resolved: bool = false
+var unified_coppice_active: bool = false
+var unified_coppice_resolved: bool = false
+var unified_shroom_active: bool = false
+var unified_shroom_resolved: bool = false
+var unified_dispute_active: bool = false
+var unified_dispute_resolved: bool = false
+var unified_leyline_active: bool = false
+var unified_leyline_resolved: bool = false
 
 # Experiment 1 State
 var exp1_yew_committed: bool = false
@@ -175,11 +183,30 @@ func _deselect_card() -> void:
 		selected_card_ui.set_selected(false)
 		selected_card_ui = null
 
+func get_all_slotted_instance_ids() -> Array:
+	var slotted_ids = []
+	for event_inst in events_container.get_children():
+		if is_instance_valid(event_inst) and event_inst.has_method("get_slotted_cards"):
+			var slotted = event_inst.get_slotted_cards()
+			for slot_id in slotted:
+				var card = slotted[slot_id]
+				if not card.is_empty() and card.has("instance_id"):
+					slotted_ids.append(card["instance_id"])
+	return slotted_ids
+
 func _refresh_inventory_ui() -> void:
 	for child in inventory_container.get_children():
 		child.queue_free()
 
+	var slotted_ids = get_all_slotted_instance_ids()
+
 	for card_data in inventory_cards:
+		var instance_id = card_data.get("instance_id", "")
+		if instance_id != "" and instance_id in slotted_ids:
+			continue
+		if card_data.get("is_locked", false):
+			continue
+
 		var card_inst = card_ui_scene.instantiate()
 		inventory_container.add_child(card_inst)
 		card_inst.setup(card_data, false)
@@ -234,6 +261,14 @@ func _setup_unified_run() -> void:
 	unified_spirit_shrine_resolved = false
 	unified_storm_active = false
 	unified_storm_resolved = false
+	unified_coppice_active = false
+	unified_coppice_resolved = false
+	unified_shroom_active = false
+	unified_shroom_resolved = false
+	unified_dispute_active = false
+	unified_dispute_resolved = false
+	unified_leyline_active = false
+	unified_leyline_resolved = false
 
 	exp_title_label.text = "Hedge Wizard — Unified Recombinatory Run"
 	exp_desc_label.text = "Assign cards to events, then click End Turn. Manage village unrest, spirit favor, and complete the Great Work of Magick!"
@@ -263,11 +298,40 @@ func _setup_unified_run() -> void:
 
 	_refresh_unified_events()
 
+func count_negative_cards() -> Array:
+	var neg_cards = []
+	for card in inventory_cards:
+		var tag = card.get("tag", "")
+		var id = card.get("id", "")
+		if tag in ["grievance", "curse", "blighted_soil", "path_constraint"] or id in ["villager_grievance", "resentful_blacksmith", "blighted_soil", "forest_curse"] or card.get("is_negative", false):
+			neg_cards.append(card)
+	return neg_cards
+
 func _refresh_unified_events() -> void:
 	_clear_events()
 
 	if game_over:
 		return
+
+	# --- MASS MITIGATION EVENTS (Triggers when 3+ negative cards accumulate) ---
+	var negatives = count_negative_cards()
+	if negatives.size() >= 3:
+		_add_event({
+			"id": "uni_evt_mass_mitigate",
+			"title": "[MASS MITIGATION] Grand Village & Land Reconciliation",
+			"description": "CRISIS THRESHOLD REACHED: 3+ grievances/corruptions have accumulated! Slot 3 negative cards + 1 Resource or Wizard to cleanse them.",
+			"deadline": -1,
+			"slots": [
+				{"id": "neg_1", "label": "Grievance / Curse 1", "req_tag": "any"},
+				{"id": "neg_2", "label": "Grievance / Curse 2", "req_tag": "any"},
+				{"id": "neg_3", "label": "Grievance / Curse 3", "req_tag": "any"},
+				{"id": "cost_slot", "label": "Silver / Herb / Wizard", "req_tag": "any"}
+			],
+			"actions": [
+				{"id": "uni_mass_mitigate_feast", "label": "Hold Grand Feast (3 Cards + Silver/Herb)", "required_slots": ["neg_1", "neg_2", "neg_3", "cost_slot"]},
+				{"id": "uni_mass_mitigate_ritual", "label": "Purification Ritual (3 Cards + Wizard)", "required_slots": ["neg_1", "neg_2", "neg_3", "cost_slot"]}
+			]
+		})
 
 	# Permanent Activity 1: Forage Sacred Woods
 	_add_event({
@@ -310,6 +374,21 @@ func _refresh_unified_events() -> void:
 		],
 		"actions": [
 			{"id": "uni_brew", "label": "Brew Potion", "required_slots": ["wizard_slot", "herb_slot"]}
+		]
+	})
+
+	# Permanent Activity 4: Animate Homunculus
+	_add_event({
+		"id": "uni_act_homunculus",
+		"title": "Activity: Animate Homunculus",
+		"description": "Slot Wizard + Herb or Silver to craft a Homunculus assistant (lasts 3 turns) that acts as a Wizard.",
+		"deadline": -1,
+		"slots": [
+			{"id": "wizard_slot", "label": "Wizard", "req_tag": "wizard"},
+			{"id": "reagent_slot", "label": "Herb / Silver", "req_tag": "any"}
+		],
+		"actions": [
+			{"id": "uni_animate_homunculus", "label": "Animate Homunculus", "required_slots": ["wizard_slot", "reagent_slot"]}
 		]
 	})
 
@@ -485,6 +564,83 @@ func _refresh_unified_events() -> void:
 			],
 			"actions": [
 				{"id": "uni_ward_storm", "label": "Repel Shadow Storm", "required_slots": ["wizard_slot", "boon_slot"]}
+			]
+		})
+
+	# 7. Forest Coppice Dilemma (Spawns turn >= 2)
+	if current_turn >= 2 and not unified_coppice_resolved and not unified_coppice_active:
+		unified_coppice_active = true
+
+	if unified_coppice_active and not unified_coppice_resolved:
+		_add_event({
+			"id": "uni_evt_coppice",
+			"title": "[Dilemma] Sacred Coppice Timber Choice",
+			"description": "Spirits protect the sacred coppice, but villagers want firewood! Option A (Protect): Wizard + Herb -> 3 Cards (Blessing, Yew Wood, Wild Berries) [+2 Spirit Favor, +1 Unrest]. Option B (Harvest): Wizard -> 3 Cards (Timber, Timber, Silver) [+1 Village Favor, -1 Spirit Favor].",
+			"deadline": 2,
+			"slots": [
+				{"id": "wizard_slot", "label": "Wizard", "req_tag": "wizard"},
+				{"id": "herb_slot", "label": "Herb (Option A)", "req_tag": "herb"}
+			],
+			"actions": [
+				{"id": "uni_coppice_protect", "label": "Protect Coppice (Wizard + Herb -> 3 Cards)", "required_slots": ["wizard_slot", "herb_slot"]},
+				{"id": "uni_coppice_harvest", "label": "Harvest Timber (Wizard -> 3 Cards)", "required_slots": ["wizard_slot"]}
+			]
+		})
+
+	# 8. Rare Star-Mushroom Foraging (Spawns turn >= 3)
+	if current_turn >= 3 and not unified_shroom_resolved and not unified_shroom_active:
+		unified_shroom_active = true
+
+	if unified_shroom_active and not unified_shroom_resolved:
+		_add_event({
+			"id": "uni_evt_shroom",
+			"title": "[Opportunity] Star-Mushroom Harvest",
+			"description": "Luminous star-mushrooms bloom! Option A: Harvest with Herb + Silver -> Yields 3 Cards (Star Mushroom Reagent, Potent Remedy, Arcane Dust), BUT imposes a Forest Lord Curse! Option B: Ignore.",
+			"deadline": 2,
+			"slots": [
+				{"id": "herb_slot", "label": "Herb", "req_tag": "herb"},
+				{"id": "silver_slot", "label": "Silver Shilling", "req_tag": "currency"}
+			],
+			"actions": [
+				{"id": "uni_shroom_harvest", "label": "Harvest Star-Mushrooms (Herb + Silver -> 3 Cards + Curse)", "required_slots": ["herb_slot", "silver_slot"]}
+			]
+		})
+
+	# 9. Village Council Dispute (Spawns turn >= 4)
+	if current_turn >= 4 and not unified_dispute_resolved and not unified_dispute_active:
+		unified_dispute_active = true
+
+	if unified_dispute_active and not unified_dispute_resolved:
+		_add_event({
+			"id": "uni_evt_dispute",
+			"title": "[Petitioner] Village Council Dispute",
+			"description": "Factions quarrel over land! Option A: Broker Peace with Wizard + Silver -> Yields 3 Cards (Village Favor, Village Gratitude, Ancient Scroll) [+2 Favor, -1 Unrest, -1 Spirit Favor].",
+			"deadline": 2,
+			"slots": [
+				{"id": "wizard_slot", "label": "Wizard", "req_tag": "wizard"},
+				{"id": "silver_slot", "label": "Silver Shilling", "req_tag": "currency"}
+			],
+			"actions": [
+				{"id": "uni_dispute_broker", "label": "Broker Peace (Wizard + Silver -> 3 Cards)", "required_slots": ["wizard_slot", "silver_slot"]}
+			]
+		})
+
+	# 10. Sunken Leyline Shrine (Spawns turn >= 5)
+	if current_turn >= 5 and not unified_leyline_resolved and not unified_leyline_active:
+		unified_leyline_active = true
+
+	if unified_leyline_active and not unified_leyline_resolved:
+		_add_event({
+			"id": "uni_evt_leyline",
+			"title": "[Ancient Mystery] Sunken Leyline Shrine",
+			"description": "An ancient leyline shrine surges! Siphon magic with Wizard + Insight / Grimoire -> Yields 3 Cards (Arcane Insight x2, Sun-Gem Artifact), BUT corrupts the land with Blighted Soil!",
+			"deadline": 2,
+			"slots": [
+				{"id": "wizard_slot", "label": "Wizard", "req_tag": "wizard"},
+				{"id": "reagent_slot", "label": "Insight / Grimoire", "req_tag": "any"}
+			],
+			"actions": [
+				{"id": "uni_leyline_siphon", "label": "Siphon Leyline Power (Wizard + Reagent -> 3 Cards + Blighted Soil)", "required_slots": ["wizard_slot", "reagent_slot"]}
 			]
 		})
 
@@ -1018,6 +1174,7 @@ func _add_event(event_def: Dictionary) -> void:
 	event_inst.setup(event_def)
 	event_inst.action_triggered.connect(_on_event_action_triggered)
 	event_inst.slot_clicked.connect(_on_event_slot_clicked)
+	event_inst.slot_card_changed.connect(func(_ev): _refresh_inventory_ui())
 
 func _on_event_slot_clicked(_event_ui, slot_ui) -> void:
 	if not selected_card_data.is_empty():
@@ -1056,6 +1213,52 @@ func _on_event_action_triggered(event_ui, action_id: String) -> void:
 		event_ui.clear_all_slots()
 		add_card_to_inventory({"id": "potent_remedy", "title": "Potent Remedy", "tag": "remedy", "description": "A powerful restorative potion."})
 		log_message("BREWING: Crafted Potent Remedy from Medicinal Herb!")
+
+	elif action_id == "uni_animate_homunculus":
+		var reagent_card = slotted.get("reagent_slot", {})
+		var r_tag = reagent_card.get("tag", "")
+		if r_tag in ["herb", "currency", "material", "ingredient"]:
+			remove_card_from_inventory(reagent_card)
+			event_ui.clear_all_slots()
+			add_card_to_inventory({
+				"id": "homunculus",
+				"title": "Arcane Homunculus",
+				"tag": "wizard",
+				"description": "A temporary magical automaton. Acts as a Wizard for 3 turns.",
+				"expires_in_turns": 3
+			})
+			log_message("ALCHEMY RESULT: Animated an Arcane Homunculus! It will serve as a Wizard assistant for 3 turns.")
+		else:
+			log_message("ANIMATION FAILED: Homunculus creation requires an Herb, Silver, or Material card!")
+
+	elif action_id == "uni_mass_mitigate_feast":
+		remove_card_from_inventory(slotted.get("neg_1", {}))
+		remove_card_from_inventory(slotted.get("neg_2", {}))
+		remove_card_from_inventory(slotted.get("neg_3", {}))
+		var cost_card = slotted.get("cost_slot", {})
+		if cost_card.get("id") != "wizard":
+			remove_card_from_inventory(cost_card)
+		event_ui.clear_all_slots()
+		if village_unrest >= 2:
+			village_unrest -= 2
+		else:
+			village_unrest = 0
+		village_favor += 1
+		log_message("MASS MITIGATION: Held Grand Village Feast! Cleansed 3 negative grievances/curses and restored trust.")
+		_refresh_unified_events()
+
+	elif action_id == "uni_mass_mitigate_ritual":
+		remove_card_from_inventory(slotted.get("neg_1", {}))
+		remove_card_from_inventory(slotted.get("neg_2", {}))
+		remove_card_from_inventory(slotted.get("neg_3", {}))
+		var cost_card = slotted.get("cost_slot", {})
+		if cost_card.get("id") != "wizard":
+			remove_card_from_inventory(cost_card)
+		event_ui.clear_all_slots()
+		spirit_favor += 2
+		if village_unrest > 0: village_unrest -= 1
+		log_message("MASS MITIGATION: Performed Purification Ritual! Cleansed 3 corruptions and restored spirit harmony (+2 Spirit Favor).")
+		_refresh_unified_events()
 
 	elif action_id == "uni_work_totem":
 		totem_progress += 1
@@ -1191,6 +1394,71 @@ func _on_event_action_triggered(event_ui, action_id: String) -> void:
 		spirit_favor += 1
 		log_message("CRISIS RESOLVED: Successfully repelled the Valley Shadow Storm!")
 		_check_unified_win_loss()
+		_refresh_unified_events()
+
+	elif action_id == "uni_coppice_protect":
+		remove_card_from_inventory(slotted.get("herb_slot", {}))
+		event_ui.clear_all_slots()
+		unified_coppice_resolved = true
+		spirit_favor += 2
+		village_unrest += 1
+		add_card_to_inventory({"id": "spirit_blessing", "title": "Spirit Blessing", "tag": "boon", "description": "Blessing of the Coppice Spirits."})
+		add_card_to_inventory({"id": "yew_heartwood", "title": "Yew Heartwood", "tag": "yew_heartwood", "description": "Rare timber granted by nature."})
+		add_card_to_inventory({"id": "wild_berries", "title": "Wild Forest Berries", "tag": "herb", "description": "Sweet, healing forest berries."})
+		log_message("COPPICE CHOICE: Protected the Coppice! Gained 3 cards (Spirit Blessing, Yew Heartwood, Berries). (+2 Spirit Favor, +1 Village Unrest).")
+		_check_unified_win_loss()
+		_refresh_unified_events()
+
+	elif action_id == "uni_coppice_harvest":
+		event_ui.clear_all_slots()
+		unified_coppice_resolved = true
+		village_favor += 1
+		spirit_favor -= 1
+		add_card_to_inventory({"id": "timber", "title": "Heartwood Timber", "tag": "material", "description": "Strong construction timber."})
+		add_card_to_inventory({"id": "timber_extra", "title": "Firewood Logs", "tag": "material", "description": "A pile of firewood for winter."})
+		add_card_to_inventory({"id": "silver_shilling", "title": "Silver Shilling", "tag": "currency", "description": "Paid by villagers for firewood."})
+		log_message("COPPICE CHOICE: Harvested Timber! Gained 3 cards (Timber x2, Silver). (+1 Village Favor, -1 Spirit Favor).")
+		_check_unified_win_loss()
+		_refresh_unified_events()
+
+	elif action_id == "uni_shroom_harvest":
+		remove_card_from_inventory(slotted.get("herb_slot", {}))
+		remove_card_from_inventory(slotted.get("silver_slot", {}))
+		event_ui.clear_all_slots()
+		unified_shroom_resolved = true
+		add_card_to_inventory({"id": "star_mushroom", "title": "Star-Mushroom Reagent", "tag": "ingredient", "description": "A rare glowing fungal reagent."})
+		add_card_to_inventory({"id": "potent_remedy", "title": "Potent Remedy", "tag": "remedy", "description": "Brewed remedy from fungal essence."})
+		add_card_to_inventory({"id": "arcane_dust", "title": "Arcane Dust", "tag": "insight", "description": "Glowing spore dust."})
+		add_card_to_inventory({"id": "forest_curse", "title": "Forest Lord Curse", "tag": "curse", "description": "The Forest Lord's wrath for plundering rare fungi."})
+		log_message("SHROOM HARVEST: Harvested Star-Mushrooms! Received 3 valuable reagents, BUT angered the forest (Forest Lord Curse added!).")
+		_refresh_unified_events()
+
+	elif action_id == "uni_dispute_broker":
+		remove_card_from_inventory(slotted.get("silver_slot", {}))
+		event_ui.clear_all_slots()
+		unified_dispute_resolved = true
+		village_favor += 2
+		if village_unrest > 0: village_unrest -= 1
+		spirit_favor -= 1
+		add_card_to_inventory({"id": "village_favor_card", "title": "Village Favor", "tag": "boon", "description": "Political sway in council."})
+		add_card_to_inventory({"id": "village_gratitude", "title": "Village Gratitude", "tag": "boon", "description": "Gratitude of the council elders."})
+		add_card_to_inventory({"id": "ancient_scroll", "title": "Ancient Scroll", "tag": "scroll", "description": "Deed scroll containing old lore."})
+		log_message("COUNCIL DISPUTE: Brokered council peace! Received 3 cards (Favor, Gratitude, Scroll). (+2 Favor, -1 Unrest, -1 Spirit Favor).")
+		_check_unified_win_loss()
+		_refresh_unified_events()
+
+	elif action_id == "uni_leyline_siphon":
+		var reagent = slotted.get("reagent_slot", {})
+		if reagent.get("id") != "wizard":
+			remove_card_from_inventory(reagent)
+		event_ui.clear_all_slots()
+		unified_leyline_resolved = true
+		arcane_insight += 2
+		add_card_to_inventory({"id": "arcane_insight", "title": "Arcane Insight", "tag": "insight", "description": "Decoded leyline power."})
+		add_card_to_inventory({"id": "arcane_insight_2", "title": "Arcane Insight", "tag": "insight", "description": "Deep leyline resonance."})
+		add_card_to_inventory({"id": "sun_gem", "title": "Sun-Gem Artifact", "tag": "artifact", "description": "Crystallized leyline energy."})
+		add_card_to_inventory({"id": "blighted_soil", "title": "Blighted Soil", "tag": "path_constraint", "description": "Leyline corruption seeped into surrounding earth."})
+		log_message("LEYLINE SIPHON: Siphoned power! Received 3 cards (Insight x2, Sun-Gem), BUT land became Blighted Soil!")
 		_refresh_unified_events()
 
 	# --- EXPERIMENT 1 ACTIONS ---
